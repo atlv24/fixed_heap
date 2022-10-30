@@ -1,0 +1,20 @@
+[package]
+name = "fixed_heap"
+version = "0.1.0"
+edition = "2021"
+authors = ["Atlas Dostal <email@atlasdostal.com>"]
+repository = "https://github.com/rodolphito/fixed_heap"
+keywords = ["heap", "fixed-size", "storage", "priority", "queue"]
+categories = ["data-structures", "memory-management", "caching"]
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+description = "A fixed-size heap structure with manually provided stateful comparison function."
+
+[dependencies]
+
+[dev-dependencies]
+rand = "0.8"
+
+[features]
+default = []
+unstable = []
