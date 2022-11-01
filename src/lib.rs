@@ -49,6 +49,28 @@ impl<T, const N: usize> FixedHeap<T, N> {
         }
     }
 
+    /// Copies `slice` into the backing storage, ignoring heap properties.
+    ///
+    /// Caution: this will not preserve the heap property of the structure
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use fixed_heap::*;
+    /// let mut heap: FixedHeap<i32, 16> = FixedHeap::new();
+    /// let array = [4; 12];
+    /// heap.copy_from_slice(&array[2..8]);
+    /// assert_eq!(heap.len(), 6);
+    /// ```
+    pub fn copy_from_slice(&mut self, slice: &[T])
+    where
+        T: Copy,
+    {
+        assert!(slice.len() <= N);
+        self.high = slice.len();
+        self.as_slice_mut().copy_from_slice(slice);
+    }
+
     /// Returns a reference to the highest priority element.
     ///
     /// # Returns
@@ -62,15 +84,124 @@ impl<T, const N: usize> FixedHeap<T, N> {
     /// ```
     /// # use fixed_heap::*;
     /// let mut heap: FixedHeap<i32, 16> = FixedHeap::new();
-    /// heap.peek();
+    /// assert_eq!(heap.add_last(1), None);
+    /// assert_eq!(heap.peek(), Some(&1));
     /// ```
     #[inline(always)]
     pub fn peek(&self) -> Option<&T> {
+        self.peek_at(0)
+    }
+
+    /// Returns a reference to the element at `index`.
+    ///
+    /// # Returns
+    ///
+    /// `None` if there is no element at `index`.
+    ///
+    /// `Some(elem)` if there was an element.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use fixed_heap::*;
+    /// let mut heap: FixedHeap<i32, 16> = FixedHeap::new();
+    /// assert_eq!(heap.add_last(1), None);
+    /// assert_eq!(heap.add_last(2), None);
+    /// assert_eq!(heap.peek_at(1), Some(&2));
+    /// ```
+    #[inline(always)]
+    pub fn peek_at(&self, index: usize) -> Option<&T> {
         // # Safety
-        // If there is at least one element, then the first element is initialized
-        match self.high {
-            0 => None,
-            _ => Some(unsafe { self.data[0].assume_init_ref() }),
+        // If `index` is below `high` then `data[index]` is initialized.
+        if index < self.high {
+            Some(unsafe { self.data.get_unchecked(index).assume_init_ref() })
+        } else {
+            None
+        }
+    }
+
+    /// Tries to add `value` to the end, ignoring heap properties.
+    ///
+    /// Caution: this will not preserve the heap property of the structure
+    ///
+    /// # Returns
+    ///
+    /// `None` if there was spare capacity to accommodate `value`
+    ///
+    /// `Some(value)` if there was no spare capacity
+    ///
+    /// # Time Complexity
+    ///
+    /// O(1)
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use fixed_heap::*;
+    /// let mut heap: FixedHeap<i32, 1> = FixedHeap::new();
+    /// assert_eq!(heap.add_last(1), None);
+    /// assert_eq!(heap.add_last(2), Some(2));
+    /// ```
+    pub fn add_last(&mut self, value: T) -> Option<T> {
+        if self.high == N {
+            // Not enough space to add it
+            Some(value)
+        } else {
+            // There's enough space to add it
+            // # Safety
+            // `high` is guaranteed to be a valid index here because it is less than `N`
+            unsafe {
+                *self.data.get_unchecked_mut(self.high) = MaybeUninit::new(value);
+            }
+            self.high += 1;
+            None
+        }
+    }
+
+    /// Removes and returns the element at `index`, ignoring heap properties.
+    /// Use `pop_at` instead to preserve heap properties.
+    ///
+    /// Caution: this will not preserve the heap property of the structure
+    ///
+    /// # Returns
+    ///
+    /// `None` if there's no element at `index`.
+    ///
+    /// `Some(elem)` if there was an element at `index`.
+    ///
+    /// # Time Complexity
+    ///
+    /// O(1)
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use fixed_heap::*;
+    /// let mut heap: FixedHeap<i32, 16> = FixedHeap::new();
+    /// assert_eq!(heap.swap_remove(0), None); // []
+    /// assert_eq!(heap.add_last(1), None); // [1]
+    /// assert_eq!(heap.swap_remove(1), None); // [1]
+    /// assert_eq!(heap.add_last(2), None); // [1, 2]
+    /// assert_eq!(heap.swap_remove(0), Some(1)); // [2]
+    /// assert_eq!(heap.swap_remove(0), Some(2)); // []
+    /// ```
+    pub fn swap_remove(&mut self, index: usize) -> Option<T> {
+        if index < self.high {
+            self.high -= 1;
+
+            // # Safety
+            // `data[index]` holds an initialized value because `index` is less than `high`
+            // We just copy it because we're about to overwrite it anyways
+            let removed_node = unsafe { self.data.get_unchecked(index).assume_init_read() };
+            // We can also just copy the last element because the last index will now be treated as uninit
+            unsafe {
+                *self.data.get_unchecked_mut(index) =
+                    MaybeUninit::new(self.data.get_unchecked(self.high).assume_init_read());
+            }
+
+            Some(removed_node)
+        } else {
+            None
         }
     }
 
@@ -125,45 +256,44 @@ impl<T, const N: usize> FixedHeap<T, N> {
     {
         let mut result = None;
         let mut node_index = self.high;
-        if N == 0 {
-            // Trivial special case to avoid invalid array access
-            return Some(value);
-        } else if self.high == N {
-            // Slow path, replaces smallest element. Avoid if possible.
-            // # Safety
-            // All indexes are initialized because the heap is full
-            let mut smallest_index = N >> 1;
-            for index in N >> 1..N {
-                let node = unsafe { self.data[index].assume_init_ref() };
-                let smallest = unsafe { self.data[smallest_index].assume_init_ref() };
-                if comparer(smallest, node, state) {
-                    smallest_index = index;
+        if let Some(value) = self.add_last(value) {
+            // There was no space for the value. Let's try to evict something.
+            if N == 0 {
+                // Trivial special case to avoid invalid array access
+                return Some(value);
+            } else if self.high == N {
+                // Slow path, replaces smallest element. Avoid if possible.
+                // # Safety
+                // All indexes are initialized because the heap is full
+                let mut smallest_index = N >> 1;
+                for index in N >> 1..N {
+                    let node = unsafe { self.data.get_unchecked(index).assume_init_ref() };
+                    let smallest =
+                        unsafe { self.data.get_unchecked(smallest_index).assume_init_ref() };
+                    if comparer(smallest, node, state) {
+                        smallest_index = index;
+                    }
+                }
+                let smallest = unsafe { self.data.get_unchecked(smallest_index).assume_init_ref() };
+                if comparer(&value, smallest, state) {
+                    let replaced = mem::replace(
+                        unsafe { self.data.get_unchecked_mut(smallest_index) },
+                        MaybeUninit::new(value),
+                    );
+                    node_index = smallest_index;
+                    result = Some(unsafe { replaced.assume_init() });
+                } else {
+                    return Some(value);
                 }
             }
-            let smallest = unsafe { self.data[smallest_index].assume_init_ref() };
-            if comparer(&value, smallest, state) {
-                let replaced =
-                    mem::replace(&mut self.data[smallest_index], MaybeUninit::new(value));
-                node_index = smallest_index;
-                result = Some(unsafe { replaced.assume_init() });
-            } else {
-                return Some(value);
-            }
-        } else {
-            // Happy path, there's enough space to add it
-            // # Safety
-            // `node_index` will point to an initialized value now.
-            // `data[0..high]` must all be initialized always.
-            self.data[self.high] = MaybeUninit::new(value);
-            self.high += 1;
         }
 
         while node_index != 0 {
             let parent_index = (node_index - 1) >> 1;
             // # Safety
             // These indices are initialized because they are in `0..high`
-            let node = unsafe { self.data[node_index].assume_init_ref() };
-            let parent = unsafe { self.data[parent_index].assume_init_ref() };
+            let node = unsafe { self.data.get_unchecked(node_index).assume_init_ref() };
+            let parent = unsafe { self.data.get_unchecked(parent_index).assume_init_ref() };
             if !comparer(node, parent, state) {
                 break;
             }
@@ -211,7 +341,8 @@ impl<T, const N: usize> FixedHeap<T, N> {
     /// # use fixed_heap::*;
     /// let mut heap: FixedHeap<i32, 16> = FixedHeap::new();
     /// let comparer = |a: &i32, b: &i32, _: &()| a > b;
-    /// heap.pop(&comparer, &());
+    /// heap.push(1, &comparer, &());
+    /// assert_eq!(heap.pop(&comparer, &()), Some(1));
     /// ```
     ///
     /// With keys into another struct:
@@ -220,42 +351,83 @@ impl<T, const N: usize> FixedHeap<T, N> {
     /// let mut heap: FixedHeap<usize, 16> = FixedHeap::new();
     /// let comparer = |a: &usize, b: &usize, state: &[i32; 4]| state[*a] > state[*b];
     /// let state = [1, 3, 1, 2];
-    /// heap.pop(&comparer, &state);
+    /// heap.push(1, &comparer, &state);
+    /// assert_eq!(heap.pop(&comparer, &state), Some(1));
     /// ```
     pub fn pop<S, F>(&mut self, comparer: &F, state: &S) -> Option<T>
     where
         F: Fn(&T, &T, &S) -> bool,
     {
-        if self.high > 0 {
-            self.high -= 1;
-            let mut deleted_node = MaybeUninit::uninit();
-            mem::swap(&mut self.data[0], &mut deleted_node);
-            // # Safety
-            // `deleted_node` now holds an initialized value, but `data[0]` is uninitialized.
-            // Restore the property of `data[0..high]` always being initialized by swapping in the last value.
-            #[cfg(all(nightly, feature = "unstable"))]
-            unsafe {
-                self.data.swap_unchecked(0, self.high);
-            }
-            #[cfg(not(all(nightly, feature = "unstable")))]
-            self.data.swap(0, self.high);
+        self.pop_at(0, comparer, state)
+    }
 
-            let mut node_index: usize = 0;
+    /// Removes and returns the element at index,
+    /// preserving the heap property by calling `comparer` with `state` to determine ordering.
+    ///
+    /// `comparer` should return true if its first argument is strictly higher priority than the second.
+    /// It is technically permitted to return true when given elements of equal priority,
+    /// although it is recommended to return false in those cases to avoid swaps for performance reasons.
+    /// A possible use case for returning true when equal is to have newly added elements take priority over older ones.
+    ///
+    /// Use `state` to pass in another datastructure in order to sort keys by associated values.
+    ///
+    /// The same comparer should always be used for `push` and `pop`, and `state` should be stable.
+    ///
+    /// If `comparer` judges that a particular element is higher priority than another one,
+    /// it is expected that that remains true for as long as those elements are in this heap.
+    ///
+    /// # Returns
+    ///
+    /// `None` if there is no element at `index`.
+    ///
+    /// `Some(elem)` if there was an element.
+    ///
+    /// # Time Complexity
+    ///
+    /// Average time complexity O(1) and worst case O(log N)
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use fixed_heap::*;
+    /// let mut heap: FixedHeap<i32, 16> = FixedHeap::new();
+    /// let comparer = |a: &i32, b: &i32, _: &()| a > b;
+    /// heap.push(1, &comparer, &());
+    /// heap.push(2, &comparer, &());
+    /// assert_eq!(heap.pop_at(1, &comparer, &()), Some(1));
+    /// ```
+    ///
+    /// With keys into another struct:
+    /// ```
+    /// # use fixed_heap::*;
+    /// let mut heap: FixedHeap<usize, 16> = FixedHeap::new();
+    /// let comparer = |a: &usize, b: &usize, state: &[i32; 4]| state[*a] > state[*b];
+    /// let state = [1, 3, 1, 2];
+    /// heap.push(1, &comparer, &state);
+    /// heap.push(2, &comparer, &state);
+    /// assert_eq!(heap.pop_at(1, &comparer, &state), Some(2));
+    /// ```
+    pub fn pop_at<S, F>(&mut self, index: usize, comparer: &F, state: &S) -> Option<T>
+    where
+        F: Fn(&T, &T, &S) -> bool,
+    {
+        if let Some(removed_node) = self.swap_remove(index) {
+            let mut node_index: usize = index;
             loop {
                 let lchild_index = (node_index << 1) + 1;
                 let rchild_index = (node_index << 1) + 2;
                 // # Safety
                 // These indices are initialized because they are in `0..high`
-                let node = unsafe { self.data[node_index].assume_init_ref() };
+                let node = unsafe { self.data.get_unchecked(node_index).assume_init_ref() };
                 let swap = if rchild_index < self.high {
-                    let lchild = unsafe { self.data[lchild_index].assume_init_ref() };
-                    let rchild = unsafe { self.data[rchild_index].assume_init_ref() };
+                    let lchild = unsafe { self.data.get_unchecked(lchild_index).assume_init_ref() };
+                    let rchild = unsafe { self.data.get_unchecked(rchild_index).assume_init_ref() };
                     match comparer(lchild, rchild, state) {
                         true => (comparer(lchild, node, state), lchild_index),
                         false => (comparer(rchild, node, state), rchild_index),
                     }
                 } else if lchild_index < self.high {
-                    let lchild = unsafe { self.data[lchild_index].assume_init_ref() };
+                    let lchild = unsafe { self.data.get_unchecked(lchild_index).assume_init_ref() };
                     (comparer(lchild, node, state), lchild_index)
                 } else {
                     (false, 0)
@@ -274,9 +446,7 @@ impl<T, const N: usize> FixedHeap<T, N> {
                 }
             }
 
-            // # Safety
-            // `deleted_node` still holds an initialized value.
-            Some(unsafe { deleted_node.assume_init() })
+            Some(removed_node)
         } else {
             None
         }
@@ -336,7 +506,7 @@ impl<T, const N: usize> FixedHeap<T, N> {
     /// let comparer = |a: &i32, b: &i32, _: &()| a > b;
     /// assert!(heap.is_empty());
     /// heap.push(1, &comparer, &());
-    /// assert!(!heap.is_full());
+    /// assert!(!heap.is_empty());
     /// ```
     #[inline(always)]
     pub fn is_empty(&self) -> bool {
@@ -368,7 +538,7 @@ impl<T, const N: usize> Drop for FixedHeap<T, N> {
     #[inline(always)]
     fn drop(&mut self) {
         for i in 0..self.high {
-            unsafe { self.data[i].assume_init_drop() };
+            unsafe { self.data.get_unchecked_mut(i).assume_init_drop() };
         }
     }
 }
@@ -438,8 +608,7 @@ impl<T, const N: usize> Iterator for IntoIter<T, N> {
             // # Safety
             // We can hand over this value without modifying the array,
             // because we manually drop only the remainder of uniterated elements
-            Some(unsafe { self.heap.data[index].assume_init_read() })
-            // Some(unsafe { mem::replace(&mut self.heap.data[index], MaybeUninit::uninit()).assume_init() })
+            Some(unsafe { self.heap.data.get_unchecked(index).assume_init_read() })
         } else {
             None
         }
@@ -476,11 +645,11 @@ mod test {
         let mut heap: FixedHeap<i32, 16> = FixedHeap::new();
         let comparer = |a: &i32, b: &i32, _: &()| a > b;
         assert_eq!(None, heap.peek());
-        heap.push(1, &comparer, &());
+        assert_eq!(heap.push(1, &comparer, &()), None);
         assert_eq!(Some(&1), heap.peek());
-        heap.push(3, &comparer, &());
+        assert_eq!(heap.push(3, &comparer, &()), None);
         assert_eq!(Some(&3), heap.peek());
-        heap.push(2, &comparer, &());
+        assert_eq!(heap.push(2, &comparer, &()), None);
         assert_eq!(Some(&3), heap.peek());
 
         assert_eq!(Some(3), heap.pop(&comparer, &()));
@@ -493,14 +662,30 @@ mod test {
     }
 
     #[test]
+    fn test_add_last_swap_remove() {
+        let mut heap: FixedHeap<i32, 4> = FixedHeap::new();
+        assert_eq!(heap.add_last(1), None);
+        assert_eq!(heap.add_last(2), None);
+        assert_eq!(heap.add_last(4), None);
+        assert_eq!(heap.add_last(3), None);
+        assert_eq!(heap.add_last(5), Some(5));
+
+        assert_eq!(Some(1), heap.swap_remove(0));
+        assert_eq!(Some(3), heap.swap_remove(0));
+        assert_eq!(Some(4), heap.swap_remove(0));
+        assert_eq!(Some(2), heap.swap_remove(0));
+        assert_eq!(None, heap.swap_remove(0));
+    }
+
+    #[test]
     fn test_push_full() {
         let mut heap: FixedHeap<i32, 4> = FixedHeap::new();
         let comparer = |a: &i32, b: &i32, _: &()| a > b;
-        heap.push(1, &comparer, &());
-        heap.push(2, &comparer, &());
-        heap.push(4, &comparer, &());
-        heap.push(3, &comparer, &());
-        heap.push(5, &comparer, &());
+        assert_eq!(heap.push(1, &comparer, &()), None);
+        assert_eq!(heap.push(2, &comparer, &()), None);
+        assert_eq!(heap.push(4, &comparer, &()), None);
+        assert_eq!(heap.push(3, &comparer, &()), None);
+        assert_eq!(heap.push(5, &comparer, &()), Some(1));
 
         assert_eq!(Some(5), heap.pop(&comparer, &()));
         assert_eq!(Some(4), heap.pop(&comparer, &()));
@@ -513,9 +698,9 @@ mod test {
     fn test_push_pop_equal() {
         let mut heap: FixedHeap<i32, 4> = FixedHeap::new();
         let comparer = |a: &i32, b: &i32, _: &()| a > b;
-        heap.push(7, &comparer, &());
-        heap.push(7, &comparer, &());
-        heap.push(7, &comparer, &());
+        assert_eq!(heap.push(7, &comparer, &()), None);
+        assert_eq!(heap.push(7, &comparer, &()), None);
+        assert_eq!(heap.push(7, &comparer, &()), None);
 
         assert_eq!(Some(7), heap.pop(&comparer, &()));
         assert_eq!(Some(7), heap.pop(&comparer, &()));
@@ -530,9 +715,9 @@ mod test {
             state[*a] > state[*b]
         }
         let state = [1, 3, 1, 2];
-        heap.push(0, &comparer, &state);
-        heap.push(1, &comparer, &state);
-        heap.push(3, &comparer, &state);
+        assert_eq!(heap.push(0, &comparer, &state), None);
+        assert_eq!(heap.push(1, &comparer, &state), None);
+        assert_eq!(heap.push(3, &comparer, &state), None);
 
         assert_eq!(Some(1), heap.pop(&comparer, &state));
         assert_eq!(Some(3), heap.pop(&comparer, &state));
@@ -544,13 +729,13 @@ mod test {
     fn test_as_slice() {
         let mut heap: FixedHeap<i32, 16> = FixedHeap::new();
         let comparer = |a: &i32, b: &i32, _: &()| a > b;
-        heap.push(7, &comparer, &());
-        heap.push(9, &comparer, &());
-        heap.push(2, &comparer, &());
-        heap.push(5, &comparer, &());
-        heap.push(8, &comparer, &());
-        heap.push(8, &comparer, &());
-        heap.push(3, &comparer, &());
+        assert_eq!(heap.push(7, &comparer, &()), None);
+        assert_eq!(heap.push(9, &comparer, &()), None);
+        assert_eq!(heap.push(2, &comparer, &()), None);
+        assert_eq!(heap.push(5, &comparer, &()), None);
+        assert_eq!(heap.push(8, &comparer, &()), None);
+        assert_eq!(heap.push(8, &comparer, &()), None);
+        assert_eq!(heap.push(3, &comparer, &()), None);
 
         let slice = heap.as_slice();
         assert_eq!(7, slice.len());
@@ -567,14 +752,17 @@ mod test {
     fn test_debug() {
         let mut heap: FixedHeap<i32, 16> = FixedHeap::new();
         let comparer = |a: &i32, b: &i32, _: &()| a > b;
-        heap.push(7, &comparer, &());
-        heap.push(9, &comparer, &());
-        heap.push(2, &comparer, &());
-        heap.push(5, &comparer, &());
-        heap.push(8, &comparer, &());
-        heap.push(8, &comparer, &());
-        heap.push(3, &comparer, &());
-        assert_eq!(format!("{:?}", heap), "FixedHeap { high: 7, data: [9, 8, 8, 5, 7, 2, 3] }");
+        assert_eq!(heap.push(7, &comparer, &()), None);
+        assert_eq!(heap.push(9, &comparer, &()), None);
+        assert_eq!(heap.push(2, &comparer, &()), None);
+        assert_eq!(heap.push(5, &comparer, &()), None);
+        assert_eq!(heap.push(8, &comparer, &()), None);
+        assert_eq!(heap.push(8, &comparer, &()), None);
+        assert_eq!(heap.push(3, &comparer, &()), None);
+        assert_eq!(
+            format!("{:?}", heap),
+            "FixedHeap { high: 7, data: [9, 8, 8, 5, 7, 2, 3] }"
+        );
     }
 
     #[test]
@@ -736,7 +924,7 @@ mod test {
     }
 
     #[test]
-    fn test_fuzz_random() {
+    fn test_fuzz() {
         let rng = RefCell::new(rand::thread_rng());
         fn comparer(_: &usize, _: &usize, rng: &RefCell<ThreadRng>) -> bool {
             rng.borrow_mut().gen()
