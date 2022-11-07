@@ -6,7 +6,8 @@
     trivial_casts,
     trivial_numeric_casts,
     unused_lifetimes,
-    unused_import_braces
+    unused_import_braces,
+    clippy::shadow_unrelated
 )]
 #![deny(missing_docs, unaligned_references, unsafe_op_in_unsafe_fn)]
 #![cfg_attr(
@@ -419,6 +420,7 @@ impl<T, const N: usize> FixedHeap<T, N> {
                 // # Safety
                 // These indices are initialized because they are in `0..high`
                 let node = unsafe { self.data.get_unchecked(node_index).assume_init_ref() };
+                // Determine which child to sift upwards by comparing
                 let swap = if rchild_index < self.high {
                     let lchild = unsafe { self.data.get_unchecked(lchild_index).assume_init_ref() };
                     let rchild = unsafe { self.data.get_unchecked(rchild_index).assume_init_ref() };
@@ -432,15 +434,16 @@ impl<T, const N: usize> FixedHeap<T, N> {
                 } else {
                     (false, 0)
                 };
-                if let (true, index) = swap {
+                // Sift upwards if the `compared_index` is higher priority
+                if let (true, compared_index) = swap {
                     #[cfg(all(nightly, feature = "unstable"))]
                     unsafe {
-                        self.data.swap_unchecked(node_index, index);
+                        self.data.swap_unchecked(node_index, compared_index);
                     }
                     #[cfg(not(all(nightly, feature = "unstable")))]
-                    self.data.swap(node_index, index);
+                    self.data.swap(node_index, compared_index);
 
-                    node_index = index;
+                    node_index = compared_index;
                 } else {
                     break;
                 }
