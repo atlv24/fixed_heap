@@ -644,6 +644,23 @@ mod test {
     use std::cell::RefCell;
 
     #[test]
+    fn test_default() {
+        let heap: FixedHeap<i32, 4> = FixedHeap::default();
+        assert_eq!(&[0; 0], heap.as_slice());
+    }
+
+    #[test]
+    fn test_copy_from_slice() {
+        let mut heap: FixedHeap<i32, 4> = FixedHeap::new();
+        heap.copy_from_slice(&[0, 3]);
+        assert_eq!(&[0, 3], heap.as_slice());
+        heap.copy_from_slice(&[]);
+        assert_eq!(&[0; 0], heap.as_slice());
+        heap.copy_from_slice(&[1, 3, 6, 2]);
+        assert_eq!(&[1, 3, 6, 2], heap.as_slice());
+    }
+
+    #[test]
     fn test_push_peek_pop() {
         let mut heap: FixedHeap<i32, 16> = FixedHeap::new();
         let comparer = |a: &i32, b: &i32, _: &()| a > b;
@@ -763,9 +780,95 @@ mod test {
         assert_eq!(heap.push(8, &comparer, &()), None);
         assert_eq!(heap.push(3, &comparer, &()), None);
         assert_eq!(
-            format!("{:?}", heap),
-            "FixedHeap { high: 7, data: [9, 8, 8, 5, 7, 2, 3] }"
+            format!("{:?}", heap.into_iter()),
+            "IntoIter { next: 0, heap: ManuallyDrop { value: FixedHeap { high: 7, data: [9, 8, 8, 5, 7, 2, 3] } } }"
         );
+    }
+
+    #[test]
+    fn test_iter() {
+        let mut heap: FixedHeap<i32, 4> = FixedHeap::new();
+        assert_eq!(None, heap.iter().next());
+        heap.copy_from_slice(&[2, 3, 6]);
+        let mut iter = heap.iter();
+        assert_eq!(Some(&2), iter.next());
+        assert_eq!(Some(&3), iter.next());
+        assert_eq!(Some(&6), iter.next());
+        assert_eq!(None, iter.next());
+    }
+
+    #[test]
+    fn test_iter_mut() {
+        let mut heap: FixedHeap<i32, 4> = FixedHeap::new();
+        assert_eq!(None, heap.iter_mut().next());
+        heap.copy_from_slice(&[2, 3, 6]);
+        let mut iter = heap.iter_mut();
+        *iter.next().unwrap() = 5;
+        *iter.next().unwrap() = 4;
+        *iter.next().unwrap() = 2;
+        assert_eq!(&[5, 4, 2], heap.as_slice());
+    }
+
+    #[test]
+    fn test_into_iter() {
+        let mut heap: FixedHeap<i32, 4> = FixedHeap::new();
+        heap.copy_from_slice(&[2, 3, 6]);
+        let mut iter = heap.into_iter();
+        assert_eq!((3, Some(3)), iter.size_hint());
+        assert_eq!(Some(2), iter.next());
+        assert_eq!(Some(3), iter.next());
+        assert_eq!(Some(6), iter.next());
+        assert_eq!(None, iter.next());
+    }
+
+    #[test]
+    fn test_into_iter_ref() {
+        let mut heap: FixedHeap<i32, 4> = FixedHeap::new();
+        assert_eq!(None, (&heap).into_iter().next());
+        heap.copy_from_slice(&[2, 3, 6]);
+        let mut iter = (&heap).into_iter();
+        assert_eq!(Some(&2), iter.next());
+        assert_eq!(Some(&3), iter.next());
+        assert_eq!(Some(&6), iter.next());
+        assert_eq!(None, iter.next());
+    }
+
+    #[test]
+    fn test_into_iter_mut() {
+        let mut heap: FixedHeap<i32, 4> = FixedHeap::new();
+        assert_eq!(None, (&mut heap).into_iter().next());
+        heap.copy_from_slice(&[2, 3, 6]);
+        let mut iter = (&mut heap).into_iter();
+        *iter.next().unwrap() = 5;
+        *iter.next().unwrap() = 4;
+        *iter.next().unwrap() = 2;
+        assert_eq!(&[5, 4, 2], heap.as_slice());
+    }
+
+    #[test]
+    fn test_len() {
+        let mut heap: FixedHeap<i32, 4> = FixedHeap::new();
+        assert_eq!(0, heap.len());
+        heap.copy_from_slice(&[2, 3, 6]);
+        assert_eq!(3, heap.len());
+    }
+
+    #[test]
+    fn test_is_empty() {
+        let mut heap: FixedHeap<i32, 4> = FixedHeap::new();
+        assert!(heap.is_empty());
+        heap.copy_from_slice(&[2, 3, 6]);
+        assert!(!heap.is_empty());
+    }
+
+    #[test]
+    fn test_is_full() {
+        let mut heap: FixedHeap<i32, 4> = FixedHeap::new();
+        assert!(!heap.is_full());
+        heap.copy_from_slice(&[2, 3, 6]);
+        assert!(!heap.is_full());
+        heap.copy_from_slice(&[4, 1, 5, 3]);
+        assert!(heap.is_full());
     }
 
     #[test]
@@ -798,7 +901,6 @@ mod test {
         assert_eq!(*drops.borrow(), 11);
     }
 
-    #[derive(Clone)]
     struct DropCounted<'a>(&'a RefCell<usize>);
 
     impl<'a> Drop for DropCounted<'a> {
