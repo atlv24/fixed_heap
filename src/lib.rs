@@ -14,8 +14,9 @@
     all(nightly, feature = "unstable"),
     feature(maybe_uninit_uninit_array, slice_swap_unchecked)
 )]
+#![cfg_attr(not(test), no_std)]
 
-use std::{
+use core::{
     fmt::{Debug, Formatter, Result},
     iter::FusedIterator,
     mem::{self, ManuallyDrop, MaybeUninit},
@@ -458,14 +459,14 @@ impl<T, const N: usize> FixedHeap<T, N> {
     /// Provides immutable access to the backing array of the heap.
     #[inline(always)]
     pub fn as_slice(&self) -> &[T] {
-        unsafe { std::slice::from_raw_parts(self.data.as_ptr() as *const T, self.high) }
+        unsafe { core::slice::from_raw_parts(self.data.as_ptr() as *const T, self.high) }
     }
 
     /// Provides mutable access to the backing array of the heap.
     /// Caution: you must preserve the heap property of the structure
     #[inline(always)]
     pub fn as_slice_mut(&mut self) -> &mut [T] {
-        unsafe { std::slice::from_raw_parts_mut(self.data.as_mut_ptr() as *mut T, self.high) }
+        unsafe { core::slice::from_raw_parts_mut(self.data.as_mut_ptr() as *mut T, self.high) }
     }
 
     /// Provides mutable iteration of the heap's elements.
@@ -640,8 +641,8 @@ impl<T, const N: usize> FusedIterator for IntoIter<T, N> {}
 #[cfg(test)]
 mod test {
     use crate::*;
+    use core::cell::RefCell;
     use rand::{rngs::ThreadRng, Rng};
-    use std::cell::RefCell;
 
     #[test]
     fn test_default() {
