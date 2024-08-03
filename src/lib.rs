@@ -9,7 +9,7 @@
     unused_import_braces,
     clippy::shadow_unrelated
 )]
-#![deny(missing_docs, unaligned_references, unsafe_op_in_unsafe_fn)]
+#![deny(missing_docs, unsafe_op_in_unsafe_fn)]
 #![cfg_attr(
     all(nightly, feature = "unstable"),
     feature(maybe_uninit_uninit_array, slice_swap_unchecked)
