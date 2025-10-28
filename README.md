@@ -6,19 +6,19 @@ data-structures. This permits having a heap of keys ordered by the values
 associated with them in another data-structure. Please consult
 [**the documentation**](https://docs.rs/fixed_heap) for more information.
 
-The minimum required Rust version for `fixed_heap` is 1.60.0. To start using
+The minimum required Rust version for `fixed_heap` is 1.85.0. To start using
 `fixed_heap` add the following to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-fixed_heap = "0.2"
+fixed_heap = "0.3"
 ```
 
 For additional performance, enable `unstable` feature on nightly with
 
 ```toml
 [dependencies]
-fixed_heap = { version = "0.2", features = ["unstable"] }
+fixed_heap = { version = "0.3", features = ["unstable"] }
 ```
 
 ## Example

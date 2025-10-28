@@ -11,7 +11,7 @@
 )]
 #![deny(missing_docs, unsafe_op_in_unsafe_fn)]
 #![cfg_attr(
-    all(nightly, feature = "unstable"),
+    all(feature = "unstable"),
     feature(maybe_uninit_uninit_array, slice_swap_unchecked)
 )]
 #![cfg_attr(not(test), no_std)]
@@ -44,9 +44,9 @@ impl<T, const N: usize> FixedHeap<T, N> {
     pub fn new() -> Self {
         Self {
             high: 0,
-            #[cfg(all(nightly, feature = "unstable"))]
+            #[cfg(feature = "unstable")]
             data: MaybeUninit::uninit_array(),
-            #[cfg(not(all(nightly, feature = "unstable")))]
+            #[cfg(not(feature = "unstable"))]
             data: unsafe { MaybeUninit::uninit().assume_init() },
         }
     }
@@ -300,11 +300,11 @@ impl<T, const N: usize> FixedHeap<T, N> {
                 break;
             }
 
-            #[cfg(all(nightly, feature = "unstable"))]
+            #[cfg(feature = "unstable")]
             unsafe {
                 self.data.swap_unchecked(node_index, parent_index);
             }
-            #[cfg(not(all(nightly, feature = "unstable")))]
+            #[cfg(not(feature = "unstable"))]
             self.data.swap(node_index, parent_index);
 
             node_index = parent_index;
@@ -437,11 +437,11 @@ impl<T, const N: usize> FixedHeap<T, N> {
                 };
                 // Sift upwards if the `compared_index` is higher priority
                 if let (true, compared_index) = swap {
-                    #[cfg(all(nightly, feature = "unstable"))]
+                    #[cfg(feature = "unstable")]
                     unsafe {
                         self.data.swap_unchecked(node_index, compared_index);
                     }
-                    #[cfg(not(all(nightly, feature = "unstable")))]
+                    #[cfg(not(feature = "unstable"))]
                     self.data.swap(node_index, compared_index);
 
                     node_index = compared_index;
@@ -472,7 +472,7 @@ impl<T, const N: usize> FixedHeap<T, N> {
     /// Provides mutable iteration of the heap's elements.
     /// NOTE: The elements are NOT in the order they'd be popped in!
     #[inline(always)]
-    pub fn iter(&self) -> Iter<T> {
+    pub fn iter(&self) -> Iter<'_, T> {
         self.as_slice().iter()
     }
 
@@ -480,7 +480,7 @@ impl<T, const N: usize> FixedHeap<T, N> {
     /// NOTE: The elements are NOT in the order they'd be popped in!
     /// Caution: you must preserve the heap property of the structure
     #[inline(always)]
-    pub fn iter_mut(&mut self) -> IterMut<T> {
+    pub fn iter_mut(&mut self) -> IterMut<'_, T> {
         self.as_slice_mut().iter_mut()
     }
 
@@ -642,7 +642,7 @@ impl<T, const N: usize> FusedIterator for IntoIter<T, N> {}
 mod test {
     use crate::*;
     use core::cell::RefCell;
-    use rand::{rngs::ThreadRng, Rng};
+    use rand::{Rng, rngs::ThreadRng};
 
     #[test]
     fn test_default() {
@@ -979,7 +979,7 @@ mod test {
         for _ in 0..iters {
             let mut heap: FixedHeap<i8, N> = FixedHeap::new();
             let mut array = [0i8; M];
-            rand::thread_rng().fill(&mut array[..]);
+            rand::rng().fill(&mut array[..]);
             for element in array {
                 heap.push(element, comparer, &());
             }
@@ -1031,9 +1031,9 @@ mod test {
 
     #[test]
     fn test_fuzz() {
-        let rng = RefCell::new(rand::thread_rng());
+        let rng = RefCell::new(rand::rng());
         fn comparer(_: &usize, _: &usize, rng: &RefCell<ThreadRng>) -> bool {
-            rng.borrow_mut().gen()
+            rng.borrow_mut().random()
         }
         fuzz_state::<_, _, 0, 4>(&comparer, &rng);
         fuzz_state::<_, _, 1, 4>(&comparer, &rng);
