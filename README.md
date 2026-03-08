@@ -11,14 +11,14 @@ The minimum required Rust version for `fixed_heap` is 1.85.0. To start using
 
 ```toml
 [dependencies]
-fixed_heap = "0.3"
+fixed_heap = "0.4"
 ```
 
 For additional performance, enable `unstable` feature on nightly with
 
 ```toml
 [dependencies]
-fixed_heap = { version = "0.3", features = ["unstable"] }
+fixed_heap = { version = "0.4", features = ["unstable"] }
 ```
 
 ## Example

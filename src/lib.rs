@@ -10,10 +10,7 @@
     clippy::shadow_unrelated
 )]
 #![deny(missing_docs, unsafe_op_in_unsafe_fn)]
-#![cfg_attr(
-    all(feature = "unstable"),
-    feature(maybe_uninit_uninit_array, slice_swap_unchecked)
-)]
+#![cfg_attr(all(feature = "unstable"), feature(slice_swap_unchecked))]
 #![cfg_attr(not(test), no_std)]
 
 use core::{
@@ -44,10 +41,7 @@ impl<T, const N: usize> FixedHeap<T, N> {
     pub fn new() -> Self {
         Self {
             high: 0,
-            #[cfg(feature = "unstable")]
-            data: MaybeUninit::uninit_array(),
-            #[cfg(not(feature = "unstable"))]
-            data: unsafe { MaybeUninit::uninit().assume_init() },
+            data: [const { MaybeUninit::uninit() }; N],
         }
     }
 
@@ -414,6 +408,11 @@ impl<T, const N: usize> FixedHeap<T, N> {
         F: Fn(&T, &T, &S) -> bool,
     {
         if let Some(removed_node) = self.swap_remove(index) {
+            // If we removed the last element, swap_remove already decremented high
+            // and no sifting is needed. Sifting here would read a logically-dead slot.
+            if index >= self.high {
+                return Some(removed_node);
+            }
             let mut node_index: usize = index;
             loop {
                 let lchild_index = (node_index << 1) + 1;
@@ -450,6 +449,28 @@ impl<T, const N: usize> FixedHeap<T, N> {
                 }
             }
 
+            // If the element did not sift down, it may need to sift up.
+            // The replacement (formerly last) element could be higher priority than its new parent.
+            if node_index == index {
+                while node_index != 0 {
+                    let parent_index = (node_index - 1) >> 1;
+                    let node = unsafe { self.data.get_unchecked(node_index).assume_init_ref() };
+                    let parent = unsafe { self.data.get_unchecked(parent_index).assume_init_ref() };
+                    if !comparer(node, parent, state) {
+                        break;
+                    }
+
+                    #[cfg(feature = "unstable")]
+                    unsafe {
+                        self.data.swap_unchecked(node_index, parent_index);
+                    }
+                    #[cfg(not(feature = "unstable"))]
+                    self.data.swap(node_index, parent_index);
+
+                    node_index = parent_index;
+                }
+            }
+
             Some(removed_node)
         } else {
             None
@@ -469,7 +490,7 @@ impl<T, const N: usize> FixedHeap<T, N> {
         unsafe { core::slice::from_raw_parts_mut(self.data.as_mut_ptr() as *mut T, self.high) }
     }
 
-    /// Provides mutable iteration of the heap's elements.
+    /// Provides immutable iteration of the heap's elements.
     /// NOTE: The elements are NOT in the order they'd be popped in!
     #[inline(always)]
     pub fn iter(&self) -> Iter<'_, T> {
@@ -908,6 +929,24 @@ mod test {
         fn drop(&mut self) {
             *self.0.borrow_mut() += 1;
         }
+    }
+
+    #[test]
+    fn test_pop_at_sift_up() {
+        // This test fails if pop_at only sifts down and doesn't sift up.
+        let mut heap: FixedHeap<i32, 16> = FixedHeap::new();
+        let comparer = |a: &i32, b: &i32, _: &()| a > b;
+        for &v in &[50, 10, 30, 5, 8, 25, 28] {
+            heap.push(v, &comparer, &());
+        }
+        assert_eq!(heap.pop_at(3, &comparer, &()), Some(5));
+        assert_eq!(heap.pop(&comparer, &()), Some(50));
+        assert_eq!(heap.pop(&comparer, &()), Some(30));
+        assert_eq!(heap.pop(&comparer, &()), Some(28));
+        assert_eq!(heap.pop(&comparer, &()), Some(25));
+        assert_eq!(heap.pop(&comparer, &()), Some(10));
+        assert_eq!(heap.pop(&comparer, &()), Some(8));
+        assert_eq!(heap.pop(&comparer, &()), None);
     }
 
     #[test]
